@@ -66,6 +66,8 @@ case "$MAX_DURATION_SEC" in
 esac
 QQ_EMAIL="${QQ_EMAIL:-}"
 QQ_SMTP_AUTH_CODE="${QQ_SMTP_AUTH_CODE:-}"
+BARK_URL="${BARK_URL:-}"
+BARK_KEY="${BARK_KEY:-}"
 
 # Remaining seconds until the time limit, or "inf" when there is no limit at all
 remaining_sec() {
@@ -169,6 +171,27 @@ EOF
         echo "    - 网络/防火墙拦住了 smtps://smtp.qq.com:465"
         echo "    - QQ 拒绝从机房 IP（GitHub runner）发信: 请把 SMTP_URL 换成别的邮箱服务"
         echo "    - 用 SMTP_DEBUG=true（Actions 输入 smtp_debug）重跑，可看到 QQ 的原始回复"
+        return 1
+    fi
+}
+
+# --- Bark push ---
+send_bark() {
+    local title="$1" body="$2"
+    if [ -z "$BARK_URL" ] || [ -z "$BARK_KEY" ]; then
+        echo "  (跳过 Bark: 未配置 BARK_URL 或 BARK_KEY)"
+        return 0
+    fi
+    local bark_server="${BARK_URL%/}"
+    local url="${bark_server}/${BARK_KEY}/${title}/${body}"
+    url=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$url', safe=':/'))" 2>/dev/null || echo "$url")
+    local resp
+    resp=$(curl -sS --max-time 10 "$url" 2>&1)
+    if echo "$resp" | grep -q '"code":200'; then
+        echo "  Bark 推送成功"
+        return 0
+    else
+        echo "  Bark 推送失败: $resp"
         return 1
     fi
 }
@@ -298,6 +321,7 @@ while true; do
         echo ""
         echo "=== 发送最终报告 ==="
         send_email "Anyrouter 保活报告 ($(date '+%Y-%m-%d'))" "$ALL_RESULTS" || true
+        send_bark "Anyrouter 保活报告" "$(echo "$ALL_RESULTS" | head -20 | tr '\n' '|')" || true
         echo ""
 
         # Do one more round if time allows, but signal it's the last
@@ -332,6 +356,7 @@ echo "========================================"
 # Send one final report if we never sent one (e.g. very short run)
 if [ "$HAS_SENT_REPORT" = false ]; then
     send_email "Anyrouter 保活报告 ($(date '+%Y-%m-%d'))" "$ALL_RESULTS" || true
+    send_bark "Anyrouter 保活报告" "$(echo "$ALL_RESULTS" | head -20 | tr '\n' '|')" || true
 fi
 
 echo "完成。"

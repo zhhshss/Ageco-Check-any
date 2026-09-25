@@ -325,3 +325,14 @@ bats tests/
 - **Prompt 池**：默认 20 条轻量探针（`scripts/prompts.txt`），每次随机选一条；工程提问池在 `scripts/prompts-engineering.txt`，用 `PROMPTS_FILE` 切换
 - **CLI 协议**：`anthropic` 走 Claude Code CLI、`codex` 走 Codex CLI；不确定装没装就先跑 `bash scripts/install-cli.sh codex`（已装会跳过）
 - **Actions 分钟数**：不停止 = 24/7 占用 runner。私有仓库按套餐计分钟数（Free 套餐 2000 分钟/月），24/7 约 43,200 分钟/月，很快会超额；public 仓库不限。想省额度就把 `auto_continue` 填 `false`
+
+## Bark 推送（可选）
+
+在 workflow 的 `bark_url` 和 `bark_key` 输入中配置 Bark 服务器和 Key，即可在保活报告时推送到 iOS：
+
+| 输入 | 说明 |
+|---|---|
+| `bark_url` | Bark 服务器地址，如 `https://api.day.app` |
+| `bark_key` | Bark 推送 Key |
+
+配置后，每次保活报告会同时通过邮件和 Bark 推送。

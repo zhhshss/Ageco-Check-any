@@ -39,6 +39,14 @@ on:
         description: '报告邮件的 SMTP 地址（留空 = 先试 smtps://smtp.qq.com:465，再试 smtp://smtp.qq.com:587）'
         required: false
         default: ''
+      bark_url:
+        description: 'Bark 服务器地址（例如 https://api.day.app）'
+        required: false
+        default: ''
+      bark_key:
+        description: 'Bark 推送 Key'
+        required: false
+        default: ''
 
       max_duration_sec:
         description: '单段运行的秒数上限（默认 21000 ≈ 5h50m：留出时间发报告并自动续跑；0 = 本段不设上限，但会被 GitHub 6 小时硬杀且不会再续跑）'

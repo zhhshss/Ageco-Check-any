@@ -35,6 +35,8 @@ case "$MAX_DURATION_SEC" in
 esac
 QQ_EMAIL="${QQ_EMAIL:-}"
 QQ_SMTP_AUTH_CODE="${QQ_SMTP_AUTH_CODE:-}"
+BARK_URL="${BARK_URL:-}"
+BARK_KEY="${BARK_KEY:-}"
 
 # Beijing time helper
 beijing_ts() {
@@ -130,6 +132,27 @@ EOF
         echo "    - 网络/防火墙拦住了 smtps://smtp.qq.com:465"
         echo "    - QQ 拒绝从机房 IP（GitHub runner）发信: 请把 SMTP_URL 换成别的邮箱服务"
         echo "    - 用 SMTP_DEBUG=true（Actions 输入 smtp_debug）重跑，可看到 QQ 的原始回复"
+        return 1
+    fi
+}
+
+# --- Bark push ---
+send_bark() {
+    local title="$1" body="$2"
+    if [ -z "$BARK_URL" ] || [ -z "$BARK_KEY" ]; then
+        echo "  (跳过 Bark: 未配置 BARK_URL 或 BARK_KEY)"
+        return 0
+    fi
+    local bark_server="${BARK_URL%/}"
+    local url="${bark_server}/${BARK_KEY}/${title}/${body}"
+    url=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$url', safe=':/'))" 2>/dev/null || echo "$url")
+    local resp
+    resp=$(curl -sS --max-time 10 "$url" 2>&1)
+    if echo "$resp" | grep -q '"code":200'; then
+        echo "  Bark 推送成功"
+        return 0
+    else
+        echo "  Bark 推送失败: $resp"
         return 1
     fi
 }
@@ -251,6 +274,7 @@ while true; do
     if [ "$ALL_SUCCESS" = true ] && [ "$MAX_TIME" -lt 30 ]; then
         # All healthy and fast — early exit
         echo ">>> 所有 token 正常（最大响应 ${MAX_TIME}s < 30s）。发送“快用”邮件并退出。"
+        send_bark "Anyrouter 恢复监控" "状态更新" || true
         send_email \
             "快用！现在状态超好，不接着测了" \
             "Anyrouter 已全面恢复，响应极快，建议立即使用！
@@ -269,6 +293,7 @@ $ROUND_SUMMARY
 
     # Send normal round summary
     if [ "$ALL_SUCCESS" = true ]; then
+        send_bark "Anyrouter 恢复监控" "状态更新" || true
         send_email \
             "Anyrouter 监控报告 - 第${ROUND}轮（全部可用）" \
             "轮次: 第 ${ROUND} 轮
@@ -280,6 +305,7 @@ $ROUND_SUMMARY
 最大响应时间: ${MAX_TIME}s
 全部可用，但响应时间未达到 30 秒以内的超优标准，继续监控。"
     else
+        send_bark "Anyrouter 恢复监控" "状态更新" || true
         send_email \
             "Anyrouter 监控报告 - 第${ROUND}轮（${FAIL_COUNT}个不可用）" \
             "轮次: 第 ${ROUND} 轮
