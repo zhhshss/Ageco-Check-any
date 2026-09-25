@@ -28,6 +28,10 @@ fi
 # --- Configuration ---
 BASE_URL="${BASE_URL:-https://anyrouter.top}"
 MODEL="${MODEL:-gpt-6-astra}"
+# MODELS: 逗号分隔的多模型列表，每个 token 会依次对所有模型做保活
+# 例如 MODELS="gpt-6-astra,claude-opus-5-5[1m]"
+# 留空则回退到单个 MODEL 变量（向后兼容）
+MODELS="${MODELS:-}"
 SLEEP_BETWEEN_TOKENS="${SLEEP_BETWEEN_TOKENS:-30}"         # seconds between tokens
 SLEEP_BETWEEN_ROUNDS="${SLEEP_BETWEEN_ROUNDS:-3000}"       # ~50 minutes between rounds
 # Fixed seconds between two consecutive requests. When set it wins over both
@@ -205,7 +209,22 @@ if [ ${#TOKENS[@]} -eq 0 ]; then
 fi
 echo "已加载 ${#TOKENS[@]} 个 token"
 echo "接口地址: $BASE_URL"
-echo "模型: $MODEL"
+
+# Build the effective model list: MODELS wins when set, otherwise fall back to MODEL.
+if [ -n "$MODELS" ]; then
+    IFS=',' read -r -a MODEL_LIST <<< "$MODELS"
+    # Trim whitespace around each model id
+    for mi in "${!MODEL_LIST[@]}"; do
+        MODEL_LIST[$mi]="$(printf '%s' "${MODEL_LIST[$mi]}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+    done
+else
+    MODEL_LIST=("$MODEL")
+fi
+if [ ${#MODEL_LIST[@]} -eq 0 ]; then
+    echo "ERROR: 模型列表为空，退出。" >&2
+    exit 1
+fi
+echo "模型列表: ${MODEL_LIST[*]}"
 if [ -n "$REQUEST_INTERVAL_SEC" ]; then
     echo "请求间隔: ${REQUEST_INTERVAL_SEC}s（固定，无抖动）"
     if [ "$SLOW_INTERVAL_SEC" -gt 0 ]; then
@@ -255,33 +274,40 @@ while true; do
             break
         fi
 
-        echo "[$((i+1))/${#TOKENS[@]}] 正在测试 $token_preview ..."
-
-        if result=$(bash "$SCRIPT_DIR/keepalive.sh" "$token" "$BASE_URL" "$MODEL" 2>&1); then
-            echo "$result"
-            echo "  ✓ $token_preview 正常"
-            ROUND_RESULTS+="  ✓ $token_preview 正常"$'\n'
-            ROUND_SUCCESS=$((ROUND_SUCCESS + 1))
-
-            # First healthy answer: stop hammering and keep the account warm at
-            # the slow pace instead (rounds become SLOW_INTERVAL_SEC apart, so
-            # every token is exercised once per SLOW_INTERVAL_MIN minutes).
-            if [ "$SLOWDOWN_ACTIVE" = false ] && [ "$SLOW_INTERVAL_SEC" -gt 0 ]; then
-                SLOWDOWN_ACTIVE=true
-                SLEEP_BETWEEN_ROUNDS="$SLOW_INTERVAL_SEC"
-                echo "  >>> 首次收到正常回复 - 降速到 ${SLOW_INTERVAL_MIN} 分钟保活节奏"
-                ROUND_RESULTS+="  >>> 首次收到正常回复: 已切换到 ${SLOW_INTERVAL_MIN} 分钟保活节奏"$'\n'
+        # 一个 token 依次对所有模型保活
+        for CURRENT_MODEL in "${MODEL_LIST[@]}"; do
+            # Check remaining time before each request
+            NOW=$(date +%s)
+            if [ -n "$MAX_DURATION_SEC" ] && [ $((NOW - START_TIME)) -ge "$MAX_DURATION_SEC" ]; then
+                echo "已达时间上限，中途结束本轮。"
+                break 2
             fi
-        else
-            echo "$result"
-            echo "  ✗ $token_preview 失败"
-            ROUND_RESULTS+="  ✗ $token_preview 失败"$'\n'
-            ROUND_FAIL=$((ROUND_FAIL + 1))
-        fi
 
-        # Pace the requests: the fixed interval when the user set one, otherwise
-        # the legacy 30s +/- 10s jitter that avoids looking like a burst.
-        if [ "$i" -lt "$(( ${#TOKENS[@]} - 1 ))" ]; then
+            echo "[$((i+1))/${#TOKENS[@]}][$CURRENT_MODEL] 正在测试 $token_preview ..."
+
+            if result=$(bash "$SCRIPT_DIR/keepalive.sh" "$token" "$BASE_URL" "$CURRENT_MODEL" 2>&1); then
+                echo "$result"
+                echo "  ✓ $token_preview [$CURRENT_MODEL] 正常"
+                ROUND_RESULTS+="  ✓ $token_preview [$CURRENT_MODEL] 正常"$'\n'
+                ROUND_SUCCESS=$((ROUND_SUCCESS + 1))
+
+                # First healthy answer: stop hammering and keep the account warm at
+                # the slow pace instead (rounds become SLOW_INTERVAL_SEC apart, so
+                # every token is exercised once per SLOW_INTERVAL_MIN minutes).
+                if [ "$SLOWDOWN_ACTIVE" = false ] && [ "$SLOW_INTERVAL_SEC" -gt 0 ]; then
+                    SLOWDOWN_ACTIVE=true
+                    SLEEP_BETWEEN_ROUNDS="$SLOW_INTERVAL_SEC"
+                    echo "  >>> 首次收到正常回复 - 降速到 ${SLOW_INTERVAL_MIN} 分钟保活节奏"
+                    ROUND_RESULTS+="  >>> 首次收到正常回复: 已切换到 ${SLOW_INTERVAL_MIN} 分钟保活节奏"$'\n'
+                fi
+            else
+                echo "$result"
+                echo "  ✗ $token_preview [$CURRENT_MODEL] 失败"
+                ROUND_RESULTS+="  ✗ $token_preview [$CURRENT_MODEL] 失败"$'\n'
+                ROUND_FAIL=$((ROUND_FAIL + 1))
+            fi
+
+            # Pace the requests between model calls of the same token
             if [ -n "$REQUEST_INTERVAL_SEC" ]; then
                 WAIT_SEC="$REQUEST_INTERVAL_SEC"
             else
@@ -290,7 +316,7 @@ while true; do
             fi
             echo "  等待 ${WAIT_SEC}s ..."
             sleep "$WAIT_SEC"
-        fi
+        done
     done
 
     # Accumulate round results
