@@ -16,6 +16,10 @@ on:
         description: '模型 ID（claude-* 走 Anthropic 协议，其他走 OpenAI Responses）'
         required: false
         default: 'gpt-6-astra'
+      models:
+        description: '多模型 ID 列表，逗号分隔（设置后覆盖单个 model）；例如: gpt-6-astra,claude-opus-5-5[1m]'
+        required: false
+        default: ''
       protocol:
         description: '协议: auto | anthropic | responses | openai | codex'
         required: false
@@ -100,6 +104,7 @@ jobs:
           ANYROUTER_TOKENS: ${{ secrets.ANYROUTER_TOKENS }}
           BASE_URL: ${{ github.event.inputs.base_url || 'https://anyrouter.top' }}
           MODEL: ${{ github.event.inputs.model || 'gpt-6-astra' }}
+          MODELS: ${{ github.event.inputs.models || '' }}
           PROTOCOL: ${{ github.event.inputs.protocol || 'auto' }}
           REQUEST_INTERVAL_SEC: ${{ github.event.inputs.interval || '' }}
           SLOW_INTERVAL_MIN: ${{ github.event.inputs.slow_interval_min || '30' }}
